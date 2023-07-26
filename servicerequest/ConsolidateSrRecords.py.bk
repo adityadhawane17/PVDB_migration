@@ -1,0 +1,105 @@
+import os
+import csv
+import json
+import sys
+from collections import OrderedDict
+from mappings import Mappings
+import logging as lg
+
+class ConsolidateSR:
+
+    def set_logging(self,name):
+        self.logging = lg.getLogger(name)
+
+    def load_additional_data_from_sr(self,additionaldata,sr_row):
+        #self.logging.info("Populating Level 0 additonal data without nested properties")
+        for key, value in Mappings.level_zero_mapping.items():
+            additionaldata[key]=sr_row.get(value)
+
+        #self.logging.info("Populating Level 0 nested Json delivery address")
+        for key, value in Mappings.deliveryAddress_mappings.items():
+            additionaldata["deliveryAddress"][key]=sr_row.get(value)
+
+        #self.logging.info("Populating Level 0 nested Json reg events")
+        for key, value in Mappings.onsaleRegEventBookingPreference_mappings.items():
+            additionaldata["onsaleRegEventBookingPreference"][key]=sr_row.get(value)
+
+        #self.logging.info("Populating Level 0 nested Json bookCashbackEvent")
+        for key,value in Mappings.bookCashbackEvent_mappings.items():
+            additionaldata["bookCashbackEvent"][key] = sr_row.get(value)
+
+        #self.logging.info("Populating Level 1 nested json for bookCashbackEvent delivery address")
+        for key,value in Mappings.bookCashbackEvent_deliveryAddress_mappings.items():
+            additionaldata["bookCashbackEvent"]["deliveryAddress"][key] = sr_row.get(value)
+
+
+        #self.logging.info("Populating Level 0 nested json for  cinemaStoreVoucher")
+        for key, value in Mappings.cinemaStoreVoucher_mappings.items():
+            additionaldata["cinemaStoreVoucher"][key]=sr_row.get(value)
+        sr_row["additional_data"]=additionaldata
+        return sr_row
+
+    def get_dict(self,file):
+        self.logging.info("Getting Dict for {file}".format(file=file))
+        filedict=None
+        with open(file, 'r') as f:
+            r = csv.reader(f)
+            next(r) #skipping the header
+            filedict = {row[0]: row[1:] for row in r}
+        return filedict
+
+    def read_sr_records(self,inputfolder,otherinputfolder,outputfolder):
+        self.logging.info("Starting with creating JSON CSV")
+        cbeventdict=self.get_dict('{otherinputfolder}cb_event_0.csv'.format(otherinputfolder=otherinputfolder))
+        voucherdict=self.get_dict('{otherinputfolder}sr_voucher_0.csv'.format(otherinputfolder=otherinputfolder))
+        saleregdict=self.get_dict('{otherinputfolder}on_sale_reg_event_0.csv'.format(otherinputfolder=otherinputfolder))
+        fjson = open("sqlscripts/extract/sr_json_sample", "r")
+        additionalData=json.load(fjson)
+        fjson.close()
+        for filename in os.listdir(inputfolder):
+            try:
+                allrows=[]
+                filepath = "{inputfolder}{filename}".format(inputfolder=inputfolder, filename=filename)
+                outputfilename="{outputfolder}op_{filename}".format(outputfolder=outputfolder,filename=filename)
+                self.logging.info("Importing file {filepath}".format(filepath=filepath))
+                f = open(filepath, "r",100)
+                fop = open(outputfilename,"w",100,newline='')
+                reader = csv.DictReader(f, delimiter=',')
+                fieldnames=["request_sysid","request_type","request_subtype","description","summary","status","substatus","received_by",
+                            "received_date","update_username","update_date","member","owner","additional_data"]
+                writer = csv.DictWriter(fop,fieldnames=fieldnames, extrasaction='ignore', delimiter = ',')
+                writer.writeheader() #writing header to Output files
+                for row in reader:
+                    #populate additional data base elements that do not require joins
+                    row = self.load_additional_data_from_sr(additionalData,row)
+                    row["owner"] = {"id":row["owner_username"]}
+                    #populate additional data with joined columns
+                    #self.logging.info("Populating CB Event by Joining CSV from {otherinputfolder} folder".format(otherinputfolder=otherinputfolder))
+                    cbevent=cbeventdict.get(row.get("cb_evnt_bkng_sysid"))
+                    if cbevent :
+                        #self.logging.info("CB Event Match")
+                        row["additional_data"]["bookCashbackEvent"]["cashBackEventBookingLine"]=cbevent
+
+                    #self.logging.info("Populating Voucher by Joining CSV from {otherinputfolder} folder".format(otherinputfolder=otherinputfolder))
+                    voucher=voucherdict.get(row.get("voucher_header_id"))
+                    if voucher :
+                        #self.logging.info("Voucher Match")
+                        row["additional_data"]["cinemaStoreVoucher"]["cinemaStoreVoucherDetailId"]=voucher
+
+                    #self.logging.info("Populating Sales Reg by Joining CSV from {otherinputfolder} folder".format(otherinputfolder=otherinputfolder))
+                    salereg = saleregdict.get(row.get("onsale_reg_evt_bkng_id"))
+                    if salereg:
+                        #self.logging.info("Sales Reg Match")
+                        row["additional_data"]["onSaleRegEventBookingLine"] = salereg
+                    #self.logging.info("Writing row to output file {outputfilename}".format(outputfilename=outputfilename))
+                    #print(row["additional_data"])
+                    row["additional_data"] = json.dumps(row["additional_data"])
+                    allrows.append(row)
+                print("Writing to file now")
+                f.close()
+                writer.writerows(allrows)
+                fop.close()
+                self.logging.info("Finished")
+            except Exception as e:
+#                t_message = "Error: " + e
+                self.logging.error(e)
