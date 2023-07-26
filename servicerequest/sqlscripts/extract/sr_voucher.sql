@@ -1,0 +1,5 @@
+ SELECT svd.voucher_header_id,
+            json_agg(json_build_object('cinemaStoreVoucherDetailId', svd.voucher_detail_id, 'voucher_header_id', svd.voucher_header_id, 'voucherType', svd.voucher_type, 'ecode', svd.ecode, 'ecodeOnline', svd.ecode_online, 'expiryDate', svd.expiry_date, 'cost', svd.cost, 'costExcludingVat', svd.cost_exclude_vat, 'price', svd.price, 'priceExcludingVat', svd.price_exclude_vat, 'description', svd.description, 'extraAttribute', svd.extra_attribute, 'loadDate', svd.load_date, 'loadFilename', svd.load_filename, 'loadFileSupplier', svd.load_file_supplier, 'dateCreated', svd.date_created, 'userCreated', svd.user_created, 'dateModified', svd.date_modified, 'userModified', svd.user_modified)) AS voucher_attributes
+           FROM ng_intermediate_data_store.stage_voucher_detail svd
+         inner join ng_intermediate_data_store.stage_service_request ssr on svd.voucher_header_id = ssr.voucher_header_id
+         GROUP BY svd.voucher_header_id
